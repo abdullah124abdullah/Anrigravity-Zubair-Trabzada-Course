@@ -1,0 +1,18 @@
+# Ignore Secrets and Local Configs
+google_secrets.json
+cookies.txt
+skool_app.db
+storage_state.json
+
+# Ignore Course Video Downloads
+Course_Downloads/**/*.mp4
+Course_Downloads/**/*.part
+Course_Downloads/**/*.ytdl
+
+# Standard Python Ignored Files
+__pycache__/
+*.pyc
+.venv/
+env/
+venv/
+.vscode/

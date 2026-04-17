@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Skool Downloader Universal App</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <!-- Load Font -> Outfit -->
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="app-container">
+        <header class="app-header">
+            <h1>Skool Universal Scraper</h1>
+            <p>Archive any Skool course directly to your Google Drive</p>
+        </header>
+
+        <main class="app-content">
+            
+            <!-- Toast Notification Container -->
+            <div id="toast-container" style="position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); z-index: 1000; display: flex; flex-direction: column; gap: 10px;"></div>
+
+            <!-- Left Column: Settings -->
+            <section class="card settings-panel">
+                <h2>1. Skool Configuration</h2>
+                <form id="credentials-form">
+                    <div class="input-group">
+                        <label>Skool Email Address</label>
+                        <input type="email" id="skool_email" name="skool_email" value="{{ user.skool_email if user else '' }}" required placeholder="jane@example.com">
+                    </div>
+                    <div class="input-group">
+                        <label>Skool Password</label>
+                        <div class="pwd-wrapper" style="position: relative;">
+                            <input type="password" id="skool_password" name="skool_password" value="{{ user.skool_password if user else '' }}" required placeholder="••••••••" style="padding-right: 40px;">
+                            <button type="button" id="toggle-pwd" class="pwd-toggle-btn">👁️</button>
+                        </div>
+                    </div>
+                    <div class="input-group">
+                        <label>Classroom URL</label>
+                        <input type="text" id="classroom_url" name="classroom_url" value="{{ user.classroom_url if user else 'skool.com/aiworkshop/classroom' }}" required placeholder="skool.com/community/classroom">
+                    </div>
+                    <button type="submit" class="btn btn-secondary" id="save-btn">Save Configurations</button>
+                    <span id="save-msg" class="status-msg"></span>
+                </form>
+
+                <hr class="divider">
+
+                <h2>2. Google Drive Integration</h2>
+                <div class="drive-status">
+                    {% if user and user.google_token %}
+                    <div class="status-badge connected">
+                        <span class="dot green"></span> Connected to {{ user.google_email }}
+                    </div>
+                    <form action="/disconnect-google" method="POST" id="disconnect-form">
+                        <button type="submit" class="btn btn-danger btn-sm">Disconnect</button>
+                    </form>
+                    {% else %}
+                    <div class="status-badge disconnected">
+                        <span class="dot red"></span> Not Connected
+                    </div>
+                    <a href="/auth/google" class="btn btn-primary btn-google" target="_blank">Connect Google Drive</a>
+                    {% endif %}
+                </div>
+            </section>
+
+            <!-- Right Column: Runner -->
+            <section class="card runner-panel">
+                <h2>3. Scraper Job Control</h2>
+                <div class="start-controls">
+                    <div style="margin-bottom: 20px;">
+                        <input type="checkbox" id="show-browser" style="transform: scale(1.3); margin-right: 10px;">
+                        <label for="show-browser" style="font-size: 1.1rem; cursor: pointer;">Show Browser Window (Watch the bot work)</label>
+                    </div>
+                    <button id="start-btn" class="btn btn-success btn-large" {% if not user or job.running %}disabled{% endif %}>
+                        ▶ START SCRAPING
+                    </button>
+                    <button id="stop-btn" class="btn btn-danger btn-large" {% if not job.running %}style="display:none;"{% endif %}>
+                        ■ STOP
+                    </button>
+                    <button id="reset-btn" class="btn btn-secondary btn-sm" style="margin-top: 10px;" {% if job.running %}disabled{% endif %}>
+                        🔄 Reset Progress & Caches
+                    </button>
+                </div>
+
+                <div class="progress-section">
+                    <div class="progress-info">
+                        <span id="current-task">Waiting to start...</span>
+                        <span id="progress-text">0%</span>
+                    </div>
+                    <div class="progress-bar-container">
+                        <div id="progress-fill" class="progress-bar-fill" style="width: 0%;"></div>
+                    </div>
+                </div>
+
+                <div class="logs-container" id="logs-box">
+                    {% for log in job.logs %}
+                        <div class="log-entry">{{ log }}</div>
+                    {% endfor %}
+                </div>
+
+            </section>
+        </main>
+    </div>
+
+    <script>
+        const saveForm = document.getElementById('credentials-form');
+        const startBtn = document.getElementById('start-btn');
+        const stopBtn = document.getElementById('stop-btn');
+        const resetBtn = document.getElementById('reset-btn');
+        const logsBox = document.getElementById('logs-box');
+        const progressFill = document.getElementById('progress-fill');
+        const progressText = document.getElementById('progress-text');
+        const currentTask = document.getElementById('current-task');
+        
+        // Toast Notification System
+        function showToast(message, type = 'success') {
+            const container = document.getElementById('toast-container');
+            const toast = document.createElement('div');
+            
+            // Basic styles for toast
+            toast.style.padding = '12px 24px';
+            toast.style.borderRadius = '8px';
+            toast.style.color = 'white';
+            toast.style.fontWeight = '500';
+            toast.style.boxShadow = '0 4px 12px rgba(0,0,0,0.15)';
+            toast.style.transition = 'all 0.3s ease';
+            toast.style.opacity = '0';
+            toast.style.transform = 'translateY(20px)';
+            
+            if (type === 'success') {
+                toast.style.backgroundColor = 'var(--success, #28a745)';
+            } else if (type === 'error') {
+                toast.style.backgroundColor = 'var(--danger, #dc3545)';
+            } else {
+                toast.style.backgroundColor = 'var(--primary, #007bff)';
+            }
+            
+            toast.innerText = message;
+            container.appendChild(toast);
+            
+            // Animate in
+            setTimeout(() => {
+                toast.style.opacity = '1';
+                toast.style.transform = 'translateY(0)';
+            }, 10);
+            
+            // Remove after 4 seconds
+            setTimeout(() => {
+                toast.style.opacity = '0';
+                toast.style.transform = 'translateY(20px)';
+                setTimeout(() => toast.remove(), 300);
+            }, 4000);
+        }
+
+        // Show/Hide Password Toggle
+        const togglePwdBtn = document.getElementById('toggle-pwd');
+        const pwdInput = document.getElementById('skool_password');
+        togglePwdBtn.addEventListener('click', () => {
+            if (pwdInput.type === 'password') {
+                pwdInput.type = 'text';
+                togglePwdBtn.innerText = '🙈';
+            } else {
+                pwdInput.type = 'password';
+                togglePwdBtn.innerText = '👁️';
+            }
+        });
+
+        // Save Credentials via AJAX
+        saveForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const btn = document.getElementById('save-btn');
+            const msg = document.getElementById('save-msg');
+            btn.innerText = 'Saving...';
+            
+            const formData = new FormData(saveForm);
+            try {
+                const res = await fetch('/save-credentials', {
+                    method: 'POST',
+                    body: formData
+                });
+                const data = await res.json();
+                if (data.success) {
+                    msg.innerHTML = '✔ Saved!';
+                    msg.style.color = 'var(--success)';
+                    startBtn.disabled = false;
+                } else {
+                    msg.innerHTML = '✖ Error: ' + data.error;
+                    msg.style.color = 'var(--danger)';
+                }
+            } catch (err) {
+                msg.innerHTML = '✖ Request Failed';
+                msg.style.color = 'var(--danger)';
+            }
+            btn.innerText = 'Save Configurations';
+            setTimeout(() => msg.innerHTML = '', 3000);
+        });
+
+        // Start Job
+        startBtn.addEventListener('click', async () => {
+            startBtn.disabled = true;
+            const showBrowser = document.getElementById('show-browser').checked;
+            try {
+                const res = await fetch('/start?show_browser=' + showBrowser, { method: 'POST' });
+                const data = await res.json();
+                if (data.success) {
+                    startBtn.style.display = 'none';
+                    stopBtn.style.display = 'block';
+                    showToast('Scraping started!', 'success');
+                    pollProgress();
+                } else {
+                    showToast('Error: ' + data.error, 'error');
+                    startBtn.disabled = false;
+                }
+            } catch (err) {
+                showToast('Request failed', 'error');
+                startBtn.disabled = false;
+            }
+        });
+
+        // Stop Job
+        stopBtn.addEventListener('click', async () => {
+            stopBtn.disabled = true;
+            await fetch('/stop', { method: 'POST' });
+        });
+
+        // Reset Job
+        resetBtn.addEventListener('click', async () => {
+            if (confirm("Are you sure you want to delete all downloaded files and reset progress? This cannot be undone.")) {
+                resetBtn.disabled = true;
+                const res = await fetch('/reset', { method: 'POST' });
+                const data = await res.json();
+                if (data.success) {
+                    showToast('Progress reset successfully!', 'success');
+                    logsBox.innerHTML = '<div class="log-entry">Progress reset. Ready to start from zero.</div>';
+                    progressFill.style.width = '0%';
+                    progressText.innerText = '0%';
+                    currentTask.innerText = 'Waiting to start...';
+                } else {
+                    showToast('Error: ' + data.error, 'error');
+                }
+                resetBtn.disabled = false;
+            }
+        });
+
+        // Disconnect Google (AJAX prevent reload jump)
+        const discForm = document.getElementById('disconnect-form');
+        if (discForm) {
+            discForm.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                await fetch('/disconnect-google', { method: 'POST' });
+                window.location.reload();
+            });
+        }
+
+        let pollInterval;
+        async function pollProgress() {
+            if(pollInterval) clearInterval(pollInterval);
+            
+            pollInterval = setInterval(async () => {
+                const res = await fetch('/progress');
+                const data = await res.json();
+                
+                // Update Progress UI
+                progressFill.style.width = data.progress + '%';
+                progressText.innerText = data.progress + '%';
+                
+                if (data.current_lesson) {
+                    currentTask.innerText = data.current_course + ' → ' + data.current_lesson;
+                }
+                
+                // Render Logs with Visual Formatting
+                let isScrolledToBottom = logsBox.scrollHeight - logsBox.clientHeight <= logsBox.scrollTop + 50;
+
+                const formattedLogs = data.logs.map(log => {
+                    let safeLog = log.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+                    
+                    // Highlight tags like [INFO], [OK], [FAIL], etc.
+                    safeLog = safeLog.replace(/\[OK\]/g, '<span style="color: var(--success); font-weight: bold;">[OK]</span>');
+                    safeLog = safeLog.replace(/\[FAIL\]/g, '<span style="color: var(--danger); font-weight: bold;">[FAIL]</span>');
+                    safeLog = safeLog.replace(/\[FATAL\]/g, '<span style="color: var(--danger); font-weight: bold;">[FATAL]</span>');
+                    safeLog = safeLog.replace(/\[INFO\]/g, '<span style="color: var(--primary); font-weight: bold;">[INFO]</span>');
+                    safeLog = safeLog.replace(/\[VIDEO\]/g, '<span style="color: #9b59b6; font-weight: bold;">[VIDEO]</span>');
+                    safeLog = safeLog.replace(/\[PLAY\]/g, '<span style="color: #e67e22; font-weight: bold;">[PLAY]</span>');
+                    safeLog = safeLog.replace(/\[COURSE\]/g, '<span style="color: #f1c40f; font-weight: bold;">[COURSE]</span>');
+                    safeLog = safeLog.replace(/\[LESSON\]/g, '<span style="color: #3498db; font-weight: bold;">[LESSON]</span>');
+                    safeLog = safeLog.replace(/\[yt-dlp\]/g, '<span style="color: #e74c3c; font-weight: bold;">[yt-dlp]</span>');
+                    safeLog = safeLog.replace(/\[ASYNC\]/g, '<span style="color: #1abc9c; font-weight: bold;">[ASYNC]</span>');
+
+                    // Highlight URLs
+                    safeLog = safeLog.replace(/(https?:\/\/[^\s]+)/g, '<a href="$1" target="_blank" style="color: #3498db; text-decoration: underline;">$1</a>');
+
+                    return `<div class="log-entry" style="font-family: monospace; border-bottom: 1px solid #333; padding-bottom: 4px; margin-bottom: 4px;">${safeLog}</div>`;
+                });
+
+                logsBox.innerHTML = formattedLogs.join('');
+                
+                // Only auto-scroll if user was already at the bottom
+                if (isScrolledToBottom) {
+                    logsBox.scrollTop = logsBox.scrollHeight;
+                }
+                
+                // Toggle Buttons based on running state
+                if (!data.running) {
+                    clearInterval(pollInterval);
+                    startBtn.style.display = 'block';
+                    startBtn.disabled = false;
+                    stopBtn.style.display = 'none';
+                    stopBtn.disabled = false;
+                    if (data.error) showToast('Job crashed: ' + data.error, 'error');
+                } else {
+                    startBtn.style.display = 'none';
+                    stopBtn.style.display = 'block';
+                }
+            }, 1000);
+        }
+
+        // Kick off polling on initial load if job was running
+        if ({{ 'true' if job.running else 'false' }}) {
+            pollProgress();
+        }
+        
+        // Auto scroll logs to bottom on page load
+        logsBox.scrollTop = logsBox.scrollHeight;
+    </script>
+</body>
+</html>
